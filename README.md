@@ -1,9 +1,8 @@
 # zxkevin's fork of yubikey-agent
 `yubikey-agent` by @FiloSottile is great, but I also needed support for:
- - PIV slots 9c (and maybe 9d), not just 9a
- - support for RSA and ed25519 keys
-
-Not all of these things are implemented yet, but some (multiple slot support) is. Other than that, this is largely the same ssh agent.
+ - [x] PIV slots 9c (and maybe 9d), not just 9a
+ - [ ] support for RSA and ed25519 keys
+ - [ ] support for different NIST curvevs (p384)
 
 
 Original readme:
