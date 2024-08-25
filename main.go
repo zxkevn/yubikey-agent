@@ -231,15 +231,35 @@ func (a *Agent) List() ([]*agent.Key, error) {
 	}
 	defer a.maybeReleaseYK()
 
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var keys []*agent.Key
+
+	slots := []struct {
+		slot    piv.Slot
+		comment string
+	}{
+		{piv.SlotAuthentication, "PIV Slot 9a (Authentication)"},
+		{piv.SlotSignature, "PIV Slot 9c (Digital Signature)"},
 	}
-	return []*agent.Key{{
-		Format:  pk.Type(),
-		Blob:    pk.Marshal(),
-		Comment: fmt.Sprintf("YubiKey #%d PIV Slot 9a", a.serial),
-	}}, nil
+
+	for _, s := range slots {
+		pk, err := getPublicKey(a.yk, s.slot)
+		if err != nil {
+			// Log the error but continue to the next slot
+			log.Printf("Error getting public key for %s: %v", s.comment, err)
+			continue
+		}
+		keys = append(keys, &agent.Key{
+			Format:  pk.Type(),
+			Blob:    pk.Marshal(),
+			Comment: fmt.Sprintf("YubiKey #%d %s", a.serial, s.comment),
+		})
+	}
+
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no keys found")
+	}
+
+	return keys, nil
 }
 
 func getPublicKey(yk *piv.YubiKey, slot piv.Slot) (ssh.PublicKey, error) {
@@ -272,23 +292,40 @@ func (a *Agent) Signers() ([]ssh.Signer, error) {
 }
 
 func (a *Agent) signers() ([]ssh.Signer, error) {
-	pk, err := getPublicKey(a.yk, piv.SlotAuthentication)
-	if err != nil {
-		return nil, err
+	var signers []ssh.Signer
+
+	slots := []piv.Slot{piv.SlotAuthentication, piv.SlotSignature}
+	for _, slot := range slots {
+		pk, err := getPublicKey(a.yk, slot)
+		if err != nil {
+			// Log the error but continue to the next slot
+			log.Printf("Error getting public key for slot %v: %v", slot, err)
+			continue
+		}
+		priv, err := a.yk.PrivateKey(
+			slot,
+			pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
+			piv.KeyAuth{PINPrompt: a.getPIN},
+		)
+		if err != nil {
+			// Log the error but continue to the next slot
+			log.Printf("error preparing private key for slot %v: %v", slot, err)
+			continue
+		}
+		s, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			// Log the error but continue to the next slot
+			log.Printf("error preparing signer for slot %v: %v", slot, err)
+			continue
+		}
+		signers = append(signers, s)
 	}
-	priv, err := a.yk.PrivateKey(
-		piv.SlotAuthentication,
-		pk.(ssh.CryptoPublicKey).CryptoPublicKey(),
-		piv.KeyAuth{PINPrompt: a.getPIN},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare private key: %w", err)
+
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("failed to prepare any signers")
 	}
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare signer: %w", err)
-	}
-	return []ssh.Signer{s}, nil
+
+	return signers, nil
 }
 
 func (a *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
