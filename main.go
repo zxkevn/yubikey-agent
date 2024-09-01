@@ -51,7 +51,17 @@ func main() {
 	socketPath := flag.String("l", "", "agent: path of the UNIX socket to listen on")
 	resetFlag := flag.Bool("really-delete-all-piv-keys", false, "setup: reset the PIV applet")
 	setupFlag := flag.Bool("setup", false, "setup: configure a new YubiKey")
+	algoFlag := flag.String("algo", "ecp256", "setup: algorithm to use for PIV key generation (ecp256, ecp384, rsa1024, rsa2048, rsa3072, rsa4096, ed25519, x25519)")
 	flag.Parse()
+
+	// Validate the algorithm selection
+	validAlgos := map[string]bool{
+		"ecp256":  true,
+		"ecp384":  true,
+		"rsa2048": true,
+		"rsa4096": true,
+		"ed25519": true,
+	}
 
 	if flag.NArg() > 0 {
 		flag.Usage()
@@ -60,11 +70,14 @@ func main() {
 
 	if *setupFlag {
 		log.SetFlags(0)
+		if !validAlgos[*algoFlag] {
+			log.Fatalf("Invalid algorithm selection: %s. Choose from ecp256, ecp384, rsa2048, rsa4096, or ed25519", *algoFlag)
+		}
 		yk := connectForSetup()
 		if *resetFlag {
 			runReset(yk)
 		}
-		runSetup(yk)
+		runSetup(yk, *algoFlag)
 	} else {
 		if *socketPath == "" {
 			flag.Usage()

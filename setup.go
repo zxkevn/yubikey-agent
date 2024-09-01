@@ -8,9 +8,12 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
@@ -66,7 +69,7 @@ func runReset(yk *piv.YubiKey) {
 	}
 }
 
-func runSetup(yk *piv.YubiKey) {
+func runSetup(yk *piv.YubiKey, algo string) {
 	if _, err := yk.Certificate(piv.SlotAuthentication); err == nil {
 		log.Println("‼️  This YubiKey may already setup (it has a certificate in the Authentication slot!)")
 		log.Println("")
@@ -139,8 +142,50 @@ func runSetup(yk *piv.YubiKey) {
 
 	// Function to generate key and certificate for a given slot
 	generateKeyAndCert := func(slot piv.Slot, slotName string) {
+		var pubKey crypto.PublicKey
+		var pivAlgo piv.Algorithm
+
+		// Check firmware version
+		version := yk.Version()
+		isNewFirmware := version.Major > 5 || (version.Major == 5 && version.Minor >= 7)
+
+		switch algo {
+		case "ecp256":
+			pivAlgo = piv.AlgorithmEC256
+		case "ecp384":
+			pivAlgo = piv.AlgorithmEC384
+		case "rsa2048":
+			pivAlgo = piv.AlgorithmRSA2048
+		case "rsa3072":
+			if !isNewFirmware {
+				log.Fatalf("rsa3072 is only supported on YubiKey firmware 5.7 and above")
+			}
+			//pivAlgo = piv.AlgorithmRSA3072
+			log.Fatalf("rsa3072 not supported yet!")
+		case "rsa4096":
+			if !isNewFirmware {
+				log.Fatalf("rsa4096 is only supported on YubiKey firmware 5.7 and above")
+			}
+			//pivAlgo = piv.AlgorithmRSA4096
+			log.Fatalf("rsa4096 not supported yet!")
+		case "ed25519":
+			if !isNewFirmware {
+				log.Fatalf("ed25519 is only supported on YubiKey firmware 5.7 and above")
+			}
+			//pivAlgo = piv.AlgorithmEd25519
+			log.Fatalf("ed25519 not supported yet!")
+		case "x25519":
+			if !isNewFirmware {
+				log.Fatalf("x25519 is only supported on YubiKey firmware 5.7 and above")
+			}
+			//pivAlgo = piv.AlgorithmX25519
+			log.Fatalf("x25519 not supported yet!")
+		default:
+			log.Fatalf("Unsupported algorithm: %s", algo)
+		}
+
 		pub, err := yk.GenerateKey(key, slot, piv.Key{
-			Algorithm:   piv.AlgorithmEC256,
+			Algorithm:   pivAlgo,
 			PINPolicy:   piv.PINPolicyOnce,
 			TouchPolicy: piv.TouchPolicyAlways,
 		})
@@ -148,16 +193,44 @@ func runSetup(yk *piv.YubiKey) {
 			log.Fatalf("Failed to generate key for %s slot: %v", slotName, err)
 		}
 
-		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		pubKey = pub
+
+		var priv interface{}
+		var parentPub crypto.PublicKey
+		switch algo {
+		case "ecp256":
+			priv, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			parentPub = priv.(*ecdsa.PrivateKey).Public()
+		case "ecp384":
+			priv, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			parentPub = priv.(*ecdsa.PrivateKey).Public()
+		case "rsa2048":
+			priv, err = rsa.GenerateKey(rand.Reader, 2048)
+			parentPub = priv.(*rsa.PrivateKey).Public()
+		case "rsa3072":
+			priv, err = rsa.GenerateKey(rand.Reader, 3072)
+			parentPub = priv.(*rsa.PrivateKey).Public()
+		case "rsa4096":
+			priv, err = rsa.GenerateKey(rand.Reader, 4096)
+			parentPub = priv.(*rsa.PrivateKey).Public()
+		case "ed25519":
+			_, priv, err = ed25519.GenerateKey(rand.Reader)
+			parentPub = priv.(ed25519.PrivateKey).Public()
+		case "x25519":
+			//priv, err = x25519.GenerateKey(rand.Reader)
+			//parentPub = priv.Public()
+			log.Fatalf("x25519 not supported yet!")
+		}
 		if err != nil {
 			log.Fatalf("Failed to generate parent key for %s slot: %v", slotName, err)
 		}
+
 		parent := &x509.Certificate{
 			Subject: pkix.Name{
 				Organization:       []string{"yubikey-agent"},
 				OrganizationalUnit: []string{Version},
 			},
-			PublicKey: priv.Public(),
+			PublicKey: parentPub,
 		}
 		template := &x509.Certificate{
 			Subject: pkix.Name{
@@ -168,7 +241,7 @@ func runSetup(yk *piv.YubiKey) {
 			SerialNumber: randomSerialNumber(),
 			KeyUsage:     x509.KeyUsageKeyAgreement | x509.KeyUsageDigitalSignature,
 		}
-		certBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pub, priv)
+		certBytes, err := x509.CreateCertificate(rand.Reader, template, parent, pubKey, priv)
 		if err != nil {
 			log.Fatalf("Failed to generate certificate for %s slot: %v", slotName, err)
 		}
@@ -180,7 +253,7 @@ func runSetup(yk *piv.YubiKey) {
 			log.Fatalf("Failed to store certificate for %s slot: %v", slotName, err)
 		}
 
-		sshKey, err := ssh.NewPublicKey(pub)
+		sshKey, err := ssh.NewPublicKey(pubKey)
 		if err != nil {
 			log.Fatalf("Failed to generate public key for %s slot: %v", slotName, err)
 		}

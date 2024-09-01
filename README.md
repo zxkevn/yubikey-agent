@@ -1,8 +1,10 @@
-# zxkevin's fork of yubikey-agent
-`yubikey-agent` by @FiloSottile is great, but I also needed support for:
+# kevin's fork of yubikey-agent
+`yubikey-agent` by @FiloSottile is great, but I'd also like support for 
  - [x] PIV slots 9c (and maybe 9d), not just 9a
- - [ ] support for RSA and ed25519 keys
- - [ ] support for different NIST curvevs (p384)
+ - [x] support for different NIST curvevs (p384)
+ - [ ] yubikey firmware 5.7 support:
+    - [ ] support for 5.7 RSA key sizes, ed25519, and x25519 keys
+ - [ ] a more "secure" yubikey setup
 
 
 Original readme:
